@@ -40,8 +40,8 @@ class MiragePhotoData {
         id: json['id'] ?? "",
         name: json['name'] ?? "",
         url: json['url'] ?? "",
-        width: json['width'] ?? 0,
-        height: json['height'] ?? 0,
+        width: json['metadata']['Width'] ?? 0,
+        height: json['metadata']['Height'] ?? 0,
         type: getType(
             (json['metadata']['MIMEType'] ?? "application/*").split("/").first),
         created:

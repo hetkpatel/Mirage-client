@@ -18,21 +18,18 @@ class MirageApp extends StatelessWidget {
     var colorScheme = ColorScheme.fromSeed(
       primary: _mainColor,
       seedColor: _mainColor,
-      brightness: Brightness.light,
     );
-    var primaryColor = colorScheme.primary;
 
     return MaterialApp(
       title: 'Mirage',
       theme: ThemeData(
         useMaterial3: true,
-        brightness: Brightness.light,
         colorScheme: colorScheme,
-        primaryColor: primaryColor,
-        focusColor: primaryColor,
+        primaryColor: colorScheme.primary,
+        focusColor: colorScheme.primary,
         scaffoldBackgroundColor: colorScheme.surface,
-        splashColor: primaryColor.withValues(alpha: 0.1),
-        highlightColor: primaryColor.withValues(alpha: 0.1),
+        splashColor: colorScheme.primary.withValues(alpha: 0.1),
+        highlightColor: colorScheme.primary.withValues(alpha: 0.1),
         dialogTheme:
             DialogThemeData(backgroundColor: colorScheme.surfaceContainer),
         bottomSheetTheme: BottomSheetThemeData(
@@ -40,18 +37,18 @@ class MirageApp extends StatelessWidget {
         ),
         snackBarTheme: SnackBarThemeData(
           contentTextStyle: GoogleFonts.overpass(
-            color: primaryColor,
+            color: colorScheme.primary,
             fontWeight: FontWeight.bold,
           ),
           backgroundColor: colorScheme.surfaceContainerHighest,
         ),
         appBarTheme: AppBarTheme(
           titleTextStyle: GoogleFonts.overpass(
-            color: primaryColor,
+            color: colorScheme.primary,
             fontSize: 18,
           ),
           backgroundColor: colorScheme.surfaceContainer,
-          foregroundColor: primaryColor,
+          foregroundColor: colorScheme.primary,
           elevation: 0,
           scrolledUnderElevation: 0,
           centerTitle: true,
@@ -71,27 +68,31 @@ class MirageApp extends StatelessWidget {
           displaySmall: GoogleFonts.overpass(
             fontSize: 12,
             fontWeight: FontWeight.bold,
-            color: primaryColor,
+            // color: colorScheme.primary,
+            color: Colors.white,
           ),
           titleSmall: GoogleFonts.overpass(
             fontSize: 16.0,
             fontWeight: FontWeight.bold,
-            color: primaryColor,
+            // color: colorScheme.primary,
+            color: Colors.white,
           ),
           titleMedium: GoogleFonts.overpass(
             fontSize: 18.0,
             fontWeight: FontWeight.bold,
-            color: primaryColor,
+            // color: colorScheme.primary,
+            color: Colors.white,
           ),
           titleLarge: GoogleFonts.overpass(
             fontSize: 26.0,
             fontWeight: FontWeight.bold,
-            color: primaryColor,
+            // color: colorScheme.primary,
+            color: Colors.white,
           ),
         ),
         elevatedButtonTheme: ElevatedButtonThemeData(
           style: ElevatedButton.styleFrom(
-            backgroundColor: primaryColor,
+            backgroundColor: colorScheme.primary,
             foregroundColor: Colors.black87,
           ),
         ),
@@ -122,7 +123,7 @@ class MirageApp extends StatelessWidget {
         inputDecorationTheme: InputDecorationTheme(
           focusedBorder: OutlineInputBorder(
             borderSide: BorderSide(
-              color: primaryColor,
+              color: colorScheme.primary,
             ),
             borderRadius: const BorderRadius.all(Radius.circular(15)),
           ),
@@ -133,7 +134,7 @@ class MirageApp extends StatelessWidget {
             borderRadius: const BorderRadius.all(Radius.circular(15)),
           ),
           labelStyle: GoogleFonts.overpass(
-            color: primaryColor,
+            color: colorScheme.primary,
           ),
           hintStyle: GoogleFonts.overpass(
             fontSize: 14.0,
@@ -141,7 +142,7 @@ class MirageApp extends StatelessWidget {
           ),
         ),
         textSelectionTheme: TextSelectionThemeData(
-          cursorColor: primaryColor,
+          cursorColor: colorScheme.primary,
         ),
         dropdownMenuTheme: DropdownMenuThemeData(
           menuStyle: MenuStyle(
@@ -154,7 +155,7 @@ class MirageApp extends StatelessWidget {
           inputDecorationTheme: InputDecorationTheme(
             focusedBorder: OutlineInputBorder(
               borderSide: BorderSide(
-                color: primaryColor,
+                color: colorScheme.primary,
               ),
             ),
             enabledBorder: OutlineInputBorder(
@@ -164,7 +165,7 @@ class MirageApp extends StatelessWidget {
               borderRadius: const BorderRadius.all(Radius.circular(15)),
             ),
             labelStyle: GoogleFonts.overpass(
-              color: primaryColor,
+              color: colorScheme.primary,
             ),
             hintStyle: GoogleFonts.overpass(
               fontSize: 14.0,

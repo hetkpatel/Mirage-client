@@ -6,6 +6,7 @@ import 'package:cached_network_image_platform_interface/cached_network_image_pla
 import 'package:file_saver/file_saver.dart';
 import 'package:filesize/filesize.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_session_manager/flutter_session_manager.dart';
 import 'package:intl/intl.dart';
 import 'package:mirageclient/MiragePhotoData.dart';
@@ -20,6 +21,8 @@ class GalleryPhotoViewWrapper extends StatefulWidget {
   final List<MiragePhotoData> galleryItems;
   final List<String> copyOfSelectedIDs;
   final Function(String) onSelectedCallback;
+  final Set<String>? favoriteIds;
+  final Future<Set<String>> Function(String id)? onToggleFavorite;
 
   GalleryPhotoViewWrapper({
     super.key,
@@ -28,6 +31,8 @@ class GalleryPhotoViewWrapper extends StatefulWidget {
     required this.galleryItems,
     required this.copyOfSelectedIDs,
     required this.onSelectedCallback,
+    this.favoriteIds,
+    this.onToggleFavorite,
   }) : pageController = PageController(initialPage: initialIndex);
 
   @override
@@ -39,12 +44,25 @@ class GalleryPhotoViewWrapper extends StatefulWidget {
 class _GalleryPhotoViewWrapperState extends State<GalleryPhotoViewWrapper> {
   late int _currentIndex = widget.initialIndex;
   late List<String> copyOfSelectedIDs = widget.copyOfSelectedIDs;
+  late Set<String> _favorites =
+      widget.favoriteIds != null ? {...widget.favoriteIds!} : {};
 
   void onPageChanged(int index) {
     if (context.mounted) {
       setState(() {
         _currentIndex = index;
       });
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant GalleryPhotoViewWrapper oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.favoriteIds != null) {
+      if (oldWidget.favoriteIds == null ||
+          !setEquals(widget.favoriteIds!, oldWidget.favoriteIds!)) {
+        _favorites = {...widget.favoriteIds!};
+      }
     }
   }
 
@@ -70,6 +88,24 @@ class _GalleryPhotoViewWrapperState extends State<GalleryPhotoViewWrapper> {
                   : Icons.circle_outlined,
             ),
           ),
+          if (widget.onToggleFavorite != null)
+            IconButton(
+              onPressed: () async {
+                final updated = await widget
+                    .onToggleFavorite!(widget.galleryItems[_currentIndex].id);
+                if (mounted) {
+                  setState(() {
+                    _favorites = {...updated};
+                  });
+                }
+              },
+              icon: Icon(
+                _favorites.contains(
+                        widget.galleryItems[_currentIndex].id)
+                    ? Icons.star_rounded
+                    : Icons.star_outline_rounded,
+              ),
+            ),
           IconButton(
             onPressed: () async {
               FileSaver.instance.saveFile(

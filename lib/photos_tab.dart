@@ -14,7 +14,11 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:mirageclient/MirageClient.dart';
 import 'package:mirageclient/MiragePhotoData.dart';
+import 'package:mirageclient/models/mirage_memory.dart';
+import 'package:mirageclient/utils/favorites_store.dart';
 import 'package:mirageclient/utils/GalleryPhotoViewWrapper.dart';
+
+enum PhotoFilter { all, favorites, videos, recent }
 
 class PhotosTab extends StatefulWidget {
   final ValueChanged<int> selected;
@@ -30,60 +34,221 @@ class PhotosTabState extends State<PhotosTab> {
 
   List<MiragePhotoData> _photos = [];
   List<PhotoCollection> _photoCollection = [];
+  List<MiragePhotoData> _filteredPhotos = [];
   final List<String> _selected = [];
+  Set<String> _favorites = {};
   bool _loading = true, _uploading = false, _processing = false;
   int _complete = 0, _total = 0;
   double _processingProgress = 0.0;
   bool _serverProcessing = false;
   Timer? _timer;
+  String? _error;
+  PhotoFilter _activeFilter = PhotoFilter.all;
+  List<MirageMemory> _memories = [];
+  bool _memoriesLoading = true;
 
   final ValueNotifier<String> _currentTitleNotifier =
       ValueNotifier<String>("---");
 
-  final double targetRowHeight = 250;
+  final double targetRowHeight = 150;
   final double spacing = 4;
 
   @override
   void initState() {
     super.initState();
     _startPinging();
+    _loadFavorites();
+    _loadMemories();
     getPhotos();
   }
 
-  void getPhotos() async {
+  Future<void> getPhotos() async {
     if (context.mounted) {
-      setState(() => _loading = true);
+      setState(() {
+        _loading = true;
+        _error = null;
+      });
     }
 
-    _photos = await MirageClient.getPhotos();
-    _photos = _photos.map((file) => file).toList()
-      ..sort((a, b) => b.created.compareTo(a.created));
-
-    _photoCollection.clear();
-    for (MiragePhotoData m in _photos) {
-      bool found = false;
-      for (PhotoCollection dc in _photoCollection) {
-        if (m.created.month == dc.date.month &&
-            m.created.year == dc.date.year) {
-          dc.mPhotoData.add(m);
-          found = true;
-          break;
-        }
+    try {
+      final items = await MirageClient.getPhotos();
+      items.sort((a, b) => b.created.compareTo(a.created));
+      if (!mounted) return;
+      setState(() {
+        _photos = items;
+        _rebuildCollections();
+        _loading = false;
+      });
+    } catch (error) {
+      if (kDebugMode) {
+        print('Failed to get photos: $error');
       }
-
-      if (!found) {
-        _photoCollection.add(
-            PhotoCollection(date: DateTime(m.created.year, m.created.month))
-              ..mPhotoData.add(m));
-      }
+      if (!mounted) return;
+      setState(() {
+        _error = 'We couldn\'t load your photos right now.';
+        _loading = false;
+      });
     }
+  }
 
-    _photoCollection = _photoCollection.map((dc) => dc).toList()
+  void _rebuildCollections() {
+    _filteredPhotos = _applyFilterList(_photos);
+    _photoCollection = _buildCollections(_filteredPhotos);
+    if (_photoCollection.isEmpty) {
+      _currentTitleNotifier.value = 'Photos';
+    }
+  }
+
+  List<MiragePhotoData> _applyFilterList(List<MiragePhotoData> source) {
+    switch (_activeFilter) {
+      case PhotoFilter.favorites:
+        return source.where((photo) => _favorites.contains(photo.id)).toList();
+      case PhotoFilter.videos:
+        return source.where((photo) => photo.type == MirageType.video).toList();
+      case PhotoFilter.recent:
+        final cutoff = DateTime.now().subtract(const Duration(days: 30));
+        return source.where((photo) => photo.created.isAfter(cutoff)).toList();
+      case PhotoFilter.all:
+        return List<MiragePhotoData>.from(source);
+    }
+  }
+
+  List<PhotoCollection> _buildCollections(List<MiragePhotoData> source) {
+    final Map<int, PhotoCollection> grouped = {};
+    for (final photo in source) {
+      final key = photo.created.year * 100 + photo.created.month;
+      grouped.putIfAbsent(
+        key,
+        () => PhotoCollection(
+          date: DateTime(photo.created.year, photo.created.month),
+        ),
+      );
+      grouped[key]!.mPhotoData.add(photo);
+    }
+    final collections = grouped.values.toList()
       ..sort((a, b) => b.date.compareTo(a.date));
+    return collections;
+  }
 
-    if (context.mounted) {
-      setState(() => _loading = false);
+  Future<void> _loadFavorites() async {
+    final stored = await FavoritesStore.load();
+    if (!mounted) return;
+    setState(() {
+      _favorites = stored;
+      _rebuildCollections();
+    });
+  }
+
+  Future<void> _loadMemories() async {
+    if (mounted) {
+      setState(() => _memoriesLoading = true);
     }
+    try {
+      final items = await MirageClient.getMemories();
+      if (!mounted) return;
+      setState(() {
+        _memories = items;
+        _memoriesLoading = false;
+      });
+    } catch (error) {
+      if (kDebugMode) {
+        print('Failed to load memories: $error');
+      }
+      if (!mounted) return;
+      setState(() => _memoriesLoading = false);
+    }
+  }
+
+  Future<Set<String>> _toggleFavorite(String id) async {
+    final updated = await FavoritesStore.toggle(id);
+    if (mounted) {
+      setState(() {
+        _favorites = updated;
+        _rebuildCollections();
+      });
+    }
+    return updated;
+  }
+
+  String _emptyMessage() {
+    switch (_activeFilter) {
+      case PhotoFilter.favorites:
+        return 'Tap the star on a photo to add it to Favorites.';
+      case PhotoFilter.videos:
+        return 'No videos were found. Upload one to get started.';
+      case PhotoFilter.recent:
+        return 'No photos taken in the last 30 days.';
+      case PhotoFilter.all:
+        return 'No photos found';
+    }
+  }
+
+  List<Widget> _buildPhotoSlivers() {
+    return _photoCollection.map(
+      (collection) {
+        return SliverStickyHeader.builder(
+          builder: (context, state) {
+            final newCurrentTitle =
+                DateFormat.yMMMM().format(collection.date);
+            if (state.isPinned &&
+                _currentTitleNotifier.value.toString() != newCurrentTitle) {
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                _currentTitleNotifier.value = newCurrentTitle;
+              });
+            }
+
+            return Container(
+              height: 60,
+              color: Theme.of(context).colorScheme.surface,
+              padding: const EdgeInsets.symmetric(horizontal: 16.0),
+              alignment: Alignment.centerLeft,
+              child: Text(
+                newCurrentTitle,
+                style: const TextStyle(fontSize: 24),
+              ),
+            );
+          },
+          sliver: SliverLayoutBuilder(
+            builder: (context, constraints) {
+              final availableWidth = constraints.crossAxisExtent - spacing * 2;
+              final rows = _buildRows(
+                collection.mPhotoData,
+                availableWidth,
+                targetRowHeight,
+              );
+
+              return SliverList(
+                delegate: SliverChildBuilderDelegate(
+                  (context, index) {
+                    final row = rows[index];
+                    return Padding(
+                      padding: EdgeInsets.only(
+                        top: index == 0 ? spacing : 0,
+                        bottom: spacing,
+                        left: spacing,
+                        right: spacing,
+                      ),
+                      child: Row(
+                        children: List.generate(row.length, (i) {
+                          final img = row[i];
+                          return Padding(
+                            padding: EdgeInsets.only(
+                              right: i < row.length - 1 ? spacing : 0,
+                            ),
+                            child: _buildPhotoTile(img),
+                          );
+                        }),
+                      ),
+                    );
+                  },
+                  childCount: rows.length,
+                ),
+              );
+            },
+          ),
+        );
+      },
+    ).toList();
   }
 
   void _uploadItems(List<XFile> items) async {
@@ -242,32 +407,8 @@ class PhotosTabState extends State<PhotosTab> {
 
                         _photos.removeWhere(
                             (element) => _selected.contains(element.id));
-                        _photos = _photos.map((file) => file).toList()
-                          ..sort((a, b) => b.created.compareTo(a.created));
-
-                        _photoCollection.clear();
-                        for (MiragePhotoData m in _photos) {
-                          bool found = false;
-                          for (PhotoCollection dc in _photoCollection) {
-                            if (m.created.month == dc.date.month &&
-                                m.created.year == dc.date.year) {
-                              dc.mPhotoData.add(m);
-                              found = true;
-                              break;
-                            }
-                          }
-
-                          if (!found) {
-                            _photoCollection.add(PhotoCollection(
-                                date: DateTime(m.created.year, m.created.month))
-                              ..mPhotoData.add(m));
-                          }
-                        }
-
-                        _photoCollection = _photoCollection
-                            .map((dc) => dc)
-                            .toList()
-                          ..sort((a, b) => b.date.compareTo(a.date));
+                        _photos.sort((a, b) => b.created.compareTo(a.created));
+                        _rebuildCollections();
 
                         // Trash on server side
                         for (String id in _selected) {
@@ -314,9 +455,9 @@ class PhotosTabState extends State<PhotosTab> {
                 context,
                 _createRoute(
                   GalleryPhotoViewWrapper(
-                    galleryItems: _photos,
+                    galleryItems: _filteredPhotos,
                     copyOfSelectedIDs: _selected,
-                    initialIndex: _photos.indexOf(pd.mPhotoData),
+                    initialIndex: _filteredPhotos.indexOf(pd.mPhotoData),
                     alreadySelected: _selected.contains(pd.mPhotoData.id),
                     onSelectedCallback: (id) {
                       if (_selected.contains(id)) {
@@ -326,6 +467,8 @@ class PhotosTabState extends State<PhotosTab> {
                       }
                       widget.selected(_selected.length);
                     },
+                    favoriteIds: _favorites,
+                    onToggleFavorite: _toggleFavorite,
                   ),
                 ),
               );
@@ -372,6 +515,16 @@ class PhotosTabState extends State<PhotosTab> {
                             : Colors.white54,
                       ),
                     ),
+                  if (_favorites.contains(pd.mPhotoData.id))
+                    const Positioned(
+                      bottom: 6,
+                      right: 6,
+                      child: Icon(
+                        Icons.star_rounded,
+                        color: Colors.white,
+                        size: 20,
+                      ),
+                    ),
                 ],
               ),
             ),
@@ -400,9 +553,10 @@ class PhotosTabState extends State<PhotosTab> {
               ? const Center(
                   child: CircularProgressIndicator(),
                 )
-              : _photos.isEmpty
-                  ? Center(
-                      child: Text('No photos found'),
+              : _error != null
+                  ? _ErrorNotice(
+                      message: _error!,
+                      onRetry: getPhotos,
                     )
                   : FlexibleScrollbar(
                       controller: _sc,
@@ -430,76 +584,39 @@ class PhotosTabState extends State<PhotosTab> {
                       },
                       child: CustomScrollView(
                         controller: _sc,
-                        slivers: _photoCollection.map(
-                          (collection) {
-                            return SliverStickyHeader.builder(
-                              builder: (context, state) {
-                                String newCurrentTitle =
-                                    DateFormat.yMMMM().format(collection.date);
-                                if (state.isPinned &&
-                                    _currentTitleNotifier.value.toString() !=
-                                        newCurrentTitle) {
-                                  WidgetsBinding.instance
-                                      .addPostFrameCallback((_) {
-                                    _currentTitleNotifier.value =
-                                        newCurrentTitle;
-                                  });
-                                }
-
-                                return Container(
-                                  height: 60,
-                                  color: Theme.of(context).colorScheme.surface,
-                                  padding:
-                                      EdgeInsets.symmetric(horizontal: 16.0),
-                                  alignment: Alignment.centerLeft,
-                                  child: Text(
-                                    newCurrentTitle,
-                                    style: TextStyle(fontSize: 24),
-                                  ),
-                                );
-                              },
-                              sliver: SliverLayoutBuilder(
-                                builder: (context, constraints) {
-                                  final availableWidth =
-                                      constraints.crossAxisExtent - spacing * 2;
-                                  final rows = _buildRows(collection.mPhotoData,
-                                      availableWidth, targetRowHeight);
-
-                                  return SliverList(
-                                    delegate: SliverChildBuilderDelegate(
-                                      (context, index) {
-                                        final row = rows[index];
-                                        return Padding(
-                                          padding: EdgeInsets.only(
-                                            top: index == 0 ? spacing : 0,
-                                            bottom: spacing,
-                                            left: spacing,
-                                            right: spacing,
-                                          ),
-                                          child: Row(
-                                            children:
-                                                List.generate(row.length, (i) {
-                                              final img = row[i];
-                                              return Padding(
-                                                padding: EdgeInsets.only(
-                                                    right: i < row.length - 1
-                                                        ? spacing
-                                                        : 0),
-                                                // CHILD
-                                                child: _buildPhotoTile(img),
-                                              );
-                                            }),
-                                          ),
-                                        );
-                                      },
-                                      childCount: rows.length,
-                                    ),
-                                  );
-                                },
+                        slivers: [
+                          if (_memoriesLoading || _memories.isNotEmpty)
+                            SliverToBoxAdapter(
+                              child: _MemoriesStrip(
+                                memories: _memories,
+                                loading: _memoriesLoading,
                               ),
-                            );
-                          },
-                        ).toList(),
+                            ),
+                          SliverToBoxAdapter(
+                            child: _QuickFilters(
+                              selected: _activeFilter,
+                              onChanged: (filter) {
+                                if (_activeFilter == filter) return;
+                                setState(() {
+                                  _activeFilter = filter;
+                                  _rebuildCollections();
+                                });
+                              },
+                            ),
+                          ),
+                          if (_photoCollection.isEmpty)
+                            SliverFillRemaining(
+                              hasScrollBody: false,
+                              child: Center(
+                                child: Text(
+                                  _emptyMessage(),
+                                  textAlign: TextAlign.center,
+                                ),
+                              ),
+                            )
+                          else
+                            ..._buildPhotoSlivers(),
+                        ],
                       ),
                     ),
         ),
@@ -671,6 +788,230 @@ class PhotosTabState extends State<PhotosTab> {
           child: child,
         );
       },
+    );
+  }
+}
+
+class _MemoriesStrip extends StatelessWidget {
+  const _MemoriesStrip({
+    required this.memories,
+    required this.loading,
+  });
+
+  final List<MirageMemory> memories;
+  final bool loading;
+
+  @override
+  Widget build(BuildContext context) {
+    if (loading) {
+      return SizedBox(
+        height: 140,
+        child: Center(
+          child: SizedBox.square(
+            dimension: 28,
+            child: CircularProgressIndicator(
+              strokeWidth: 2.5,
+            ),
+          ),
+        ),
+      );
+    }
+
+    if (memories.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 12.0, bottom: 8.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Text(
+              'Memories',
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            height: 140,
+            child: ListView.separated(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              scrollDirection: Axis.horizontal,
+              itemBuilder: (context, index) {
+                final memory = memories[index];
+                return SizedBox(
+                  width: 220,
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(16),
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        Image.network(
+                          memory.coverUrl,
+                          fit: BoxFit.cover,
+                          loadingBuilder: (context, child, progress) {
+                            if (progress == null) return child;
+                            return Container(
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .surfaceContainerHighest,
+                            );
+                          },
+                          errorBuilder: (context, error, stackTrace) {
+                            return Container(
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .surfaceContainerHighest,
+                              child: const Icon(Icons.photo_outlined, size: 48),
+                            );
+                          },
+                        ),
+                        Positioned(
+                          left: 12,
+                          right: 12,
+                          bottom: 12,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                memory.title,
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .titleMedium
+                                    ?.copyWith(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                              ),
+                              Text(
+                                memory.subtitle,
+                                style:
+                                    Theme.of(context).textTheme.bodySmall?.copyWith(
+                                          color: Colors.white70,
+                                        ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Positioned(
+                          top: 12,
+                          left: 12,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 4,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.black.withValues(alpha: 0.35),
+                              borderRadius: BorderRadius.circular(999),
+                            ),
+                            child: const Text(
+                              'Auto',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+              separatorBuilder: (_, __) => const SizedBox(width: 12),
+              itemCount: memories.length,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _QuickFilters extends StatelessWidget {
+  const _QuickFilters({
+    required this.selected,
+    required this.onChanged,
+  });
+
+  final PhotoFilter selected;
+  final ValueChanged<PhotoFilter> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    const entries = [
+      (PhotoFilter.all, 'All photos', Icons.photo_library_outlined),
+      (PhotoFilter.favorites, 'Favorites', Icons.star_outline_rounded),
+      (PhotoFilter.videos, 'Videos', Icons.play_arrow_rounded),
+      (PhotoFilter.recent, 'Recent', Icons.new_releases_outlined),
+    ];
+    return SizedBox(
+      height: 64,
+      child: ListView.separated(
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        scrollDirection: Axis.horizontal,
+        itemBuilder: (_, index) {
+          final entry = entries[index];
+          final isSelected = selected == entry.$1;
+          return FilterChip(
+            avatar: Icon(
+              entry.$3,
+              size: 18,
+              color: isSelected
+                  ? theme.colorScheme.onPrimary
+                  : theme.colorScheme.primary,
+            ),
+            label: Text(entry.$2),
+            selected: isSelected,
+            onSelected: (_) => onChanged(entry.$1),
+            labelStyle: theme.textTheme.bodyMedium?.copyWith(
+              fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+            ),
+          );
+        },
+        separatorBuilder: (_, __) => const SizedBox(width: 8),
+        itemCount: entries.length,
+      ),
+    );
+  }
+}
+
+class _ErrorNotice extends StatelessWidget {
+  const _ErrorNotice({
+    required this.message,
+    required this.onRetry,
+  });
+
+  final String message;
+  final Future<void> Function() onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.cloud_off_outlined, size: 48),
+          const SizedBox(height: 12),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24.0),
+            child: Text(
+              message,
+              textAlign: TextAlign.center,
+            ),
+          ),
+          const SizedBox(height: 16),
+          FilledButton.icon(
+            onPressed: onRetry,
+            icon: const Icon(Icons.refresh),
+            label: const Text('Try again'),
+          ),
+        ],
+      ),
     );
   }
 }

@@ -5,9 +5,12 @@ import 'package:filesize/filesize.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:mirageclient/MirageClient.dart';
+import 'package:mirageclient/albums_tab.dart';
+import 'package:mirageclient/explore_tab.dart';
 import 'package:mirageclient/photos_tab.dart';
 import 'package:mirageclient/trash_tab.dart';
 import 'package:mirageclient/utils/AnimatedIndexedStack.dart';
+import 'package:mirageclient/utilities_tab.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
 class MainPage extends StatefulWidget {
@@ -20,8 +23,8 @@ class MainPage extends StatefulWidget {
 class _MainPageState extends State<MainPage> {
   String _appVersion = '';
   Map<String, dynamic> _diskUsage = {
-    "filesystem_used_size": 0,
-    "filesystem_total_size": 1,
+    "used": 0,
+    "total": 1,
   };
   GlobalKey<PhotosTabState> GK_mts = GlobalKey();
   GlobalKey<TrashTabState> GK_trash = GlobalKey();
@@ -46,9 +49,62 @@ class _MainPageState extends State<MainPage> {
     setState(() => _diskUsage = result);
   }
 
-  String _getDiskPercentageUsed(used, total) {
-    double result = _diskUsage['filesystem_used_size'] /
-        _diskUsage['filesystem_total_size'];
+  bool _isSelectableIndex(int index) => index == 0 || index == 4;
+
+  String _titleForIndex() {
+    switch (_index) {
+      case 1:
+        return 'Explore';
+      case 2:
+        return 'Albums';
+      case 3:
+        return 'Utilities';
+      case 4:
+        return 'Trash';
+      case 0:
+      default:
+        return 'Mirage';
+    }
+  }
+
+  void _clearSelection() {
+    if (_index == 0) {
+      GK_mts.currentState?.deselectAll();
+    } else if (_index == 4) {
+      GK_trash.currentState?.deselectAll();
+    }
+    setState(() => _selected = 0);
+  }
+
+  Icon _selectionActionIcon() {
+    switch (_index) {
+      case 0:
+        return const Icon(Icons.delete_rounded);
+      case 4:
+        return const Icon(Icons.restore_from_trash_rounded);
+      default:
+        return const Icon(Icons.error_outline_rounded);
+    }
+  }
+
+  void _handleNavTap(int index) {
+    if (_index == index) return;
+    if (_index == 0) {
+      GK_mts.currentState?.deselectAll();
+    } else if (_index == 4) {
+      GK_trash.currentState?.deselectAll();
+    }
+    _sideMenuController.changePage(index);
+    setState(() {
+      _index = index;
+      if (!_isSelectableIndex(index)) {
+        _selected = 0;
+      }
+    });
+  }
+
+  String _getDiskPercentageUsed(double used, double total) {
+    double result = _diskUsage['used'] / _diskUsage['total'];
     if (result < 0.2) {
       return (result * 100).toStringAsFixed(2);
     } else {
@@ -57,38 +113,31 @@ class _MainPageState extends State<MainPage> {
   }
 
   Icon _trashIcon() {
-    switch (_index) {
-      case 0:
-        return Icon(Icons.delete_rounded);
-      case 1:
-        return Icon(Icons.restore_from_trash_rounded);
-      default:
-        return Icon(Icons.error_outline_rounded);
-    }
+    return _selectionActionIcon();
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: _selected != 0
+      appBar: _selected != 0 && _isSelectableIndex(_index)
           ? AppBar(
               title: Text('$_selected selected'),
               elevation: 10,
               leading: IconButton(
-                onPressed: () => GK_mts.currentState!.deselectAll(),
-                icon: Icon(Icons.clear_rounded),
+                onPressed: _clearSelection,
+                icon: const Icon(Icons.clear_rounded),
               ),
               actions: [
                 IconButton(
                   onPressed: () async {
                     switch (_index) {
                       case 0:
-                        await GK_mts.currentState!.trash();
-                        GK_trash.currentState!.getTrash();
+                        await GK_mts.currentState?.trash();
+                        GK_trash.currentState?.getTrash();
                         break;
-                      case 1:
-                        await GK_trash.currentState!.removeTrash();
-                        GK_mts.currentState!.getPhotos();
+                      case 4:
+                        await GK_trash.currentState?.removeTrash();
+                        GK_mts.currentState?.getPhotos();
                         break;
                     }
                   },
@@ -97,7 +146,7 @@ class _MainPageState extends State<MainPage> {
               ],
             )
           : AppBar(
-              title: const Text('Mirage'),
+              title: Text(_titleForIndex()),
               leading: null,
             ),
       body: SafeArea(
@@ -117,47 +166,36 @@ class _MainPageState extends State<MainPage> {
                   selectedColor: Theme.of(context).primaryColor,
                   itemBorderRadius: BorderRadius.circular(20),
                   selectedIconColor: Theme.of(context).colorScheme.surface,
-                  selectedTitleTextStyle: TextStyle(
-                    color: Theme.of(context).colorScheme.surface,
-                  ),
+                  // selectedTitleTextStyle: TextStyle(
+                  //   color: Theme.of(context).colorScheme.surface,
+                  // ),
                 ),
                 items: [
                   SideMenuItem(
                     icon: const Icon(Icons.photo_library_outlined),
                     title: 'Photos',
-                    onTap: (index, _) {
-                      GK_trash.currentState!.deselectAll();
-                      _sideMenuController.changePage(index);
-                      setState(() => _index = index);
-                    },
+                    onTap: (index, _) => _handleNavTap(index),
                   ),
-                  // SideMenuItem(
-                  //   icon: const Icon(Icons.search_rounded),
-                  //   title: 'Explore',
-                  //   onTap: (index, _) {
-                  //     _sideMenuController.changePage(index);
-                  //     setState(() => _index = index);
-                  //   },
-                  // ),
                   SideMenuItem(
-                    icon: Icon(Icons.delete_rounded),
-                    title: 'Trash',
-                    onTap: (index, _) {
-                      GK_mts.currentState!.deselectAll();
-                      _sideMenuController.changePage(index);
-                      setState(() => _index = index);
-                    },
+                    icon: const Icon(Icons.explore_outlined),
+                    title: 'Explore',
+                    onTap: (index, _) => _handleNavTap(index),
                   ),
-                  // const SideMenuItem(
-                  //   icon: Icon(Icons.map_rounded),
-                  //   // onTap: (index, _) => _sideMenuController.changePage(index),
-                  //   title: 'Map',
-                  // ),
-                  // const SideMenuItem(
-                  //   icon: Icon(Icons.photo_album_rounded),
-                  //   // onTap: (index, _) => _sideMenuController.changePage(index),
-                  //   title: 'Albums',
-                  // ),
+                  SideMenuItem(
+                    icon: const Icon(Icons.photo_album_outlined),
+                    title: 'Albums',
+                    onTap: (index, _) => _handleNavTap(index),
+                  ),
+                  SideMenuItem(
+                    icon: const Icon(Icons.settings_suggest_outlined),
+                    title: 'Utilities',
+                    onTap: (index, _) => _handleNavTap(index),
+                  ),
+                  SideMenuItem(
+                    icon: const Icon(Icons.delete_rounded),
+                    title: 'Trash',
+                    onTap: (index, _) => _handleNavTap(index),
+                  ),
                 ],
                 footer: Column(
                   mainAxisSize: MainAxisSize.min,
@@ -179,15 +217,14 @@ class _MainPageState extends State<MainPage> {
                               ),
                             ),
                             Text(
-                              "${filesize(_diskUsage['filesystem_used_size'])} of ${filesize(_diskUsage['filesystem_total_size'])} used (${_getDiskPercentageUsed(_diskUsage['filesystem_used_size'], _diskUsage['filesystem_total_size'])}%)",
+                              "${filesize(_diskUsage['used'])} of ${filesize(_diskUsage['total'])} used (${_getDiskPercentageUsed(_diskUsage['used'], _diskUsage['total'])}%)",
                             ),
                             TweenAnimationBuilder<double>(
                               duration: const Duration(milliseconds: 1000),
                               curve: Curves.easeInOutQuart,
                               tween: Tween<double>(
                                 begin: 0,
-                                end: _diskUsage['filesystem_used_size'] /
-                                    _diskUsage['filesystem_total_size'],
+                                end: _diskUsage['used'] / _diskUsage['total'],
                               ),
                               builder: (context, value, _) =>
                                   LinearProgressIndicator(
@@ -217,6 +254,9 @@ class _MainPageState extends State<MainPage> {
                     key: GK_mts,
                     selected: (value) => setState(() => _selected = value),
                   ),
+                  const ExploreTab(),
+                  const AlbumsTab(),
+                  const UtilitiesTab(),
                   TrashTab(
                     key: GK_trash,
                     selected: (value) => setState(() => _selected = value),

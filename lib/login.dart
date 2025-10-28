@@ -108,7 +108,6 @@ class _LoginPageState extends State<LoginPage> {
                                   final resBody = res.body;
                                   if (res.statusCode >= 200 &&
                                       res.statusCode < 300) {
-                                    // If it is running, then login
                                     if (resBody == 'Server is running!') {
                                       await SessionManager().set(
                                         "server",

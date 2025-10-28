@@ -7,11 +7,28 @@ import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:mirageclient/MiragePhotoData.dart';
+import 'package:mirageclient/models/mirage_album.dart';
+import 'package:mirageclient/models/mirage_memory.dart';
+import 'package:mirageclient/models/mirage_utility.dart';
+import 'package:mirageclient/sample_data.dart';
 
 class MirageClient {
   static Future<Map<String, String>> _getHeaders() async => {
         HttpHeaders.authorizationHeader: await SessionManager().get("auth"),
       };
+
+  static Future<List<dynamic>> _getJsonList(String path) async {
+    final url = '${await SessionManager().get("server")}$path';
+    final response =
+        await http.get(Uri.parse(url), headers: await _getHeaders());
+    if (response.statusCode == 200) {
+      return jsonDecode(response.body) as List<dynamic>;
+    }
+    throw HttpException(
+      'Unexpected status ${response.statusCode} for $path',
+      uri: Uri.parse(url),
+    );
+  }
 
   static Future<String> uploadFile(XFile file) async {
     try {
@@ -130,5 +147,57 @@ class MirageClient {
     String usageUrl = '${await SessionManager().get("server")}/usage';
     var res = await http.get(Uri.parse(usageUrl), headers: await _getHeaders());
     return jsonDecode(res.body);
+  }
+
+  static Future<List<MirageAlbum>> getAlbums() async {
+    try {
+      final list = await _getJsonList('/albums');
+      return list
+          .map((item) => MirageAlbum.fromJson(item as Map<String, dynamic>))
+          .toList();
+    } catch (error) {
+      if (kDebugMode) {
+        print('Falling back to sample albums: $error');
+      }
+      return SampleData.albums();
+    }
+  }
+
+  static Future<List<MirageUtilityItem>> getUtilities() async {
+    try {
+      final list = await _getJsonList('/utilities');
+      return list
+          .map((item) =>
+              MirageUtilityItem.fromJson(item as Map<String, dynamic>))
+          .toList();
+    } catch (error) {
+      if (kDebugMode) {
+        print('Falling back to sample utilities: $error');
+      }
+      return SampleData.utilities();
+    }
+  }
+
+  static Future<List<MirageMemory>> getMemories() async {
+    try {
+      final url =
+          '${await SessionManager().get("server")}/memories?limit=12&order=recent';
+      final response =
+          await http.get(Uri.parse(url), headers: await _getHeaders());
+      if (response.statusCode == 200) {
+        final list = jsonDecode(response.body) as List<dynamic>;
+        return list
+            .map((item) =>
+                MirageMemory.fromJson(item as Map<String, dynamic>))
+            .toList();
+      }
+      throw HttpException('Unexpected status ${response.statusCode}',
+          uri: Uri.parse(url));
+    } catch (error) {
+      if (kDebugMode) {
+        print('Falling back to sample memories: $error');
+      }
+      return SampleData.memories();
+    }
   }
 }
